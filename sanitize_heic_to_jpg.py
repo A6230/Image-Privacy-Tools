@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """
-heic_to_jpg.py (v1.3 — 2025-05-25)
-===================================
-Batch-convert HEIC/HEIF images to JPEG.
+sanitize_heic_to_jpg.py
+=======================
+Convert HEIC/HEIF images to JPEG while removing all metadata.
 
-Changelog
----------
-* **v1.3** – Handle images with **no EXIF at all** (NoneType error).
-  We now pass the `exif=` parameter only when we actually have a non-empty
-  byte-blob to supply.
+This script is intended for quickly sanitising photos airdropped from a phone
+so they can be uploaded without leaking any embedded information.
 """
 
 from __future__ import annotations
@@ -18,7 +15,7 @@ import pathlib
 import sys
 from typing import Iterable, Set
 
-from PIL import Image, ImageOps, ExifTags  # type: ignore
+from PIL import Image, ImageOps  # type: ignore
 
 try:
     from pillow_heif import register_heif_opener  # type: ignore
@@ -30,26 +27,12 @@ except ImportError:
         "(and 'brew install libheif' on macOS) then retry."
     )
 
-TAG_MAP = {v: k for k, v in ExifTags.TAGS.items()}
-KEEP_TAG_NAMES = {"DateTimeOriginal", "CreateDate", "DateTime"}
-
 
 def discover(root: pathlib.Path, exts: Set[str], recursive: bool) -> Iterable[pathlib.Path]:
     iterator = root.rglob("*") if recursive else root.iterdir()
     for p in iterator:
         if p.is_file() and p.suffix.lower().lstrip(".") in exts:
             yield p
-
-
-def build_exif_bytes(src_img: Image.Image) -> bytes | None:
-    orig = src_img.getexif()
-    if not orig:
-        return None
-    new = Image.Exif()
-    for tag_id, value in orig.items():
-        if TAG_MAP.get(tag_id) in KEEP_TAG_NAMES:
-            new[tag_id] = value
-    return new.tobytes() if new else None
 
 
 def convert(src: pathlib.Path, quality: int, delete: bool) -> None:
@@ -60,11 +43,7 @@ def convert(src: pathlib.Path, quality: int, delete: bool) -> None:
 
     with Image.open(src) as im:
         im = ImageOps.exif_transpose(im)
-        exif_bytes = build_exif_bytes(im)
-        save_kwargs = {"quality": quality}
-        if exif_bytes:
-            save_kwargs["exif"] = exif_bytes
-        im.convert("RGB").save(dst, "JPEG", **save_kwargs)
+        im.convert("RGB").save(dst, "JPEG", quality=quality)
         print(f"[OK] {src.name} → {dst.name}")
 
     if delete:
@@ -74,14 +53,14 @@ def convert(src: pathlib.Path, quality: int, delete: bool) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Convert HEIC/HEIF images to JPEG.",
+        description="Convert HEIC/HEIF images to metadata-free JPEG.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("directory", type=pathlib.Path, help="Source folder.")
     p.add_argument("-r", "--recursive", action="store_true", help="Recurse into sub-folders.")
     p.add_argument("-q", "--quality", type=int, default=90, help="JPEG quality 1-100.")
-    p.add_argument("--ext", default="heic,heif", help="Comma-separated list of extensions.")
-    p.add_argument("--delete", action="store_true", help="Delete original files.")
+    p.add_argument("--delete", action="store_true", help="Delete original files after conversion.")
+    p.add_argument("--ext", default="heic,heif", help="Comma-separated list of extensions to process.")
 
     args = p.parse_args()
 
